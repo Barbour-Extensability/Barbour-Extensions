@@ -1,6 +1,6 @@
 metadataVersion: 1
 extensions:
-  - name: CustomerCreditCheckP1 - Sample
+  - name: CustomerCreditCheckP1
     triggers:
       - type: METHOD
         program: CRS610
