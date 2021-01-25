@@ -23,4 +23,23 @@ apis:
                 length: 1
                 type: NUMERIC
                 mandatory: false
+          - name: UpdDLCN
+            description: Update MHDISH/DLCN
+            type: SINGLE
+            inputs:
+              - name: INOU
+                description: Direction
+                length: 1
+                type: NUMERIC
+                mandatory: true
+              - name: DLIX
+                description: Delivery Number
+                length: 11
+                type: NUMERIC
+                mandatory: true
+              - name: DLCN
+                description: Delivery Receipt Confirmation
+                length: 1
+                type: NUMERIC
+                mandatory: false
 
