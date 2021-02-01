@@ -28,9 +28,9 @@ public class ChgDLCN extends ExtendM3Transaction {
   }
 
   public void main() {
-    iINOU = mi.inData.get("INOU").trim();
-    iDLIX = mi.inData.get("DLIX").trim();
-    iDLCN = mi.inData.get("DLCN").trim();
+    iINOU = mi.inData.get("INOU") == null? "": mi.inData.get("INOU").trim();
+    iDLIX = mi.inData.get("DLIX") == null? "": mi.inData.get("DLIX").trim();
+    iDLCN = mi.inData.get("DLCN") == null? "": mi.inData.get("DLCN").trim();
 
     DBAction MHDISH_query = database.table("MHDISH")
       .index("00")
