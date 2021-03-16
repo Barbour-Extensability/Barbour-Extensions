@@ -8,7 +8,6 @@
  * 20210311   Edison Villar                   INT115 – Maintain Commodity Code across Facilities
  */
 
-
 public class CascadeCSNO extends ExtendM3Transaction {
   private final MIAPI mi
   private final MICallerAPI miCaller
@@ -16,7 +15,6 @@ public class CascadeCSNO extends ExtendM3Transaction {
 
   private String inFACI, inITNO, inCSNO
   private String XXCONO
-
   public CascadeCSNO(MIAPI mi, MICallerAPI miCaller, ProgramAPI program) {
     this.mi = mi
     this.miCaller = miCaller
