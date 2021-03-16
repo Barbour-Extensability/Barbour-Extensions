@@ -23,4 +23,24 @@ apis:
                 length: 1
                 type: NUMERIC
                 mandatory: false
-
+  - name: EXT009MI
+    transactions:
+      - name: CascadeCSNO
+        description: INT115 Maintain Commodity Code Across Facilities
+        type: SINGLE
+        inputs:
+          - name: FACI
+            description: Facility
+            length: 3
+            type: ALPHANUMERIC
+            mandatory: true
+          - name: ITNO
+            description: Item Number
+            length: 15
+            type: ALPHANUMERIC
+            mandatory: true
+          - name: CSNO
+            description: Customs Statistical Number
+            length: 15
+            type: ALPHANUMERIC
+            mandatory: false
