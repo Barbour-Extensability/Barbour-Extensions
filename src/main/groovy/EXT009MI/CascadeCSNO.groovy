@@ -94,8 +94,5 @@ public class CascadeCSNO extends ExtendM3Transaction {
       def updParam = ["FACI": faci, "ITNO": inITNO, "CSNO": inCSNO]
       miCaller.call("MMS200MI", "UpdItmFac", updParam, updHandler)
     }
-
-
   }
-
 }
