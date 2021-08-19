@@ -1,7 +1,6 @@
 metadataVersion: 1
 extensions:
 
-apis:
   - name: EXT001MI
       transactions:
           - name: UpdDLCN
@@ -23,6 +22,7 @@ apis:
                 length: 1
                 type: NUMERIC
                 mandatory: false
+
   - name: EXT009MI
     transactions:
       - name: CascadeCSNO
@@ -44,4 +44,33 @@ apis:
             length: 15
             type: ALPHANUMERIC
             mandatory: false
-  - name: PDS056
+
+  - name: SCM_IW_EXT012_CopyMMM0762
+    triggers:
+      - type: METHOD
+        program: MMS276
+        programType: INTERACTIVE
+        method: PBCHK
+        advice: PRE
+        priority: 500
+        utilities:
+
+  - name: SCM_IW_EXT012_CopyMMM0761
+    triggers:
+      - type: METHOD
+        program: PDS056
+        programType: INTERACTIVE
+        method: PBCHK
+        advice: PRE
+        priority: 500
+        utilities:
+
+  - name: EXTFOS
+    tables:
+      - type: METHOD
+        program: MMS276
+        programType: INTERACTIVE
+        method: PBCHK
+        advice: PRE
+        priority: 500
+        utilities:
