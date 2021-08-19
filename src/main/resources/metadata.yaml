@@ -64,13 +64,3 @@ extensions:
         advice: PRE
         priority: 500
         utilities:
-
-  - name: EXTFOS
-    tables:
-      - type: METHOD
-        program: MMS276
-        programType: INTERACTIVE
-        method: PBCHK
-        advice: PRE
-        priority: 500
-        utilities:
