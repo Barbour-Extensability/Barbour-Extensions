@@ -1,28 +1,7 @@
 metadataVersion: 1
 extensions:
-
-apis:
   - name: EXT001MI
       transactions:
-          - name: ChgDLCN
-            description: Change MHDISH/DLCN upon Create
-            type: SINGLE
-            inputs:
-              - name: INOU
-                description: Direction
-                length: 1
-                type: NUMERIC
-                mandatory: true
-              - name: DLIX
-                description: Delivery Number
-                length: 11
-                type: NUMERIC
-                mandatory: true
-              - name: DLCN
-                description: Delivery Receipt Confirmation
-                length: 1
-                type: NUMERIC
-                mandatory: false
           - name: UpdDLCN
             description: Update MHDISH/DLCN
             type: SINGLE
@@ -32,13 +11,45 @@ apis:
                 length: 1
                 type: NUMERIC
                 mandatory: true
-              - name: DLIX
-                description: Delivery Number
-                length: 11
-                type: NUMERIC
-                mandatory: true
               - name: DLCN
                 description: Delivery Receipt Confirmation
-                length: 1
-                type: NUMERIC
                 mandatory: false
+  - name: EXT009MI
+    transactions:
+      - name: CascadeCSNO
+        description: INT115 Maintain Commodity Code Across Facilities
+        type: SINGLE
+        inputs:
+          - name: FACI
+            description: Facility
+            length: 3
+            type: ALPHANUMERIC
+            mandatory: true
+          - name: ITNO
+            description: Item Number
+            length: 15
+            type: ALPHANUMERIC
+            mandatory: true
+          - name: CSNO
+            description: Customs Statistical Number
+            length: 15
+            type: ALPHANUMERIC
+            mandatory: false
+  - name: SCM_IW_EXT012_CopyMMM0762
+    triggers:
+      - type: METHOD
+        program: MMS276
+        programType: INTERACTIVE
+        method: PBCHK
+        advice: PRE
+        priority: 500
+        utilities:
+  - name: SCM_IW_EXT012_CopyMMM0761
+    triggers:
+      - type: METHOD
+        program: PDS056
+        programType: INTERACTIVE
+        method: PBCHK
+        advice: PRE
+        priority: 500
+        utilities:
