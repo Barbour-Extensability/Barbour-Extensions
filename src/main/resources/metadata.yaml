@@ -1,112 +1,44 @@
 metadataVersion: 1
 extensions:
 
-  - name: EXT002MI
+apis:
+  - name: EXT001MI
       transactions:
-          - name: AddMITVEM
-            description: Add a record to PPS041 - MITVEM
+          - name: ChgDLCN
+            description: Change MHDISH/DLCN upon Create
             type: SINGLE
             inputs:
-              - name: CONO
-                description: company
-                length: 3
+              - name: INOU
+                description: Direction
+                length: 1
+                type: NUMERIC
+                mandatory: true
+              - name: DLIX
+                description: Delivery Number
+                length: 11
+                type: NUMERIC
+                mandatory: true
+              - name: DLCN
+                description: Delivery Receipt Confirmation
+                length: 1
                 type: NUMERIC
                 mandatory: false
-              - name: ITNO
-                description: item number
-                length: 15
-                type: ALPHANUMERIC
-                mandatory: false
-              - name: SUNO
-                description: supplier
-                length: 10
-                type: ALPHANUMERIC
-                mandatory: false
-              - name: WHLO
-                description: warehouse
-                length: 3
-                type: ALPHANUMERIC
-                mandatory: false
-              - name: PROD
-                description: manufacturer
-                length: 10
-                type: ALPHANUMERIC
-                mandatory: false
-              - name: MNFP
-                description: manufacturer priority
-                length: 1
-                type: ALPHANUMERIC
-                mandatory: false
-              - name: MAPP
-                description: manufacturer approved
-                length: 1
-                type: ALPHANUMERIC
-                mandatory: false
-          - name: DelMITVEM
-            description: Delete a record in PPS041 - MITVEM
+          - name: UpdDLCN
+            description: Update MHDISH/DLCN
             type: SINGLE
             inputs:
-              - name: CONO
-                description: company
-                length: 3
-                type: NUMERIC
-                mandatory: false
-              - name: ITNO
-                description: item number
-                length: 15
-                type: ALPHANUMERIC
-                mandatory: false
-              - name: SUNO
-                description: supplier
-                length: 10
-                type: ALPHANUMERIC
-                mandatory: false
-              - name: WHLO
-                description: warehouse
-                length: 3
-                type: ALPHANUMERIC
-                mandatory: false
-              - name: PROD
-                description: manufacturer
-                length: 10
-                type: ALPHANUMERIC
-                mandatory: false
-          - name: UpdMITVEM
-            description: Update a record in PPS041 - MITVEM
-            type: SINGLE
-            inputs:
-              - name: CONO
-                description: company
-                length: 3
-                type: NUMERIC
-                mandatory: false
-              - name: ITNO
-                description: item number
-                length: 15
-                type: ALPHANUMERIC
-                mandatory: false
-              - name: SUNO
-                description: supplier
-                length: 10
-                type: ALPHANUMERIC
-                mandatory: false
-              - name: WHLO
-                description: warehouse
-                length: 3
-                type: ALPHANUMERIC
-                mandatory: false
-              - name: PROD
-                description: manufacturer
-                length: 10
-                type: ALPHANUMERIC
-                mandatory: false
-              - name: MNFP
-                description: manufacturer priority
+              - name: INOU
+                description: Direction
                 length: 1
-                type: ALPHANUMERIC
-                mandatory: false
-              - name: MAPP
-                description: manufacturer approved
+                type: NUMERIC
+                mandatory: true
+              - name: DLIX
+                description: Delivery Number
+                length: 11
+                type: NUMERIC
+                mandatory: true
+              - name: DLCN
+                description: Delivery Receipt Confirmation
                 length: 1
-                type: ALPHANUMERIC
+                type: NUMERIC
                 mandatory: false
