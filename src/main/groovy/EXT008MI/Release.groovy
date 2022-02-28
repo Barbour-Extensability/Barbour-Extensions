@@ -7,6 +7,8 @@
  * Date	      Changed By           	          Description
  * 20201127   Hazel Anne Dimaculangan         Release pick list
  * 20211012   E. Dacillo                      Add reference to MWMNGPCS
+ * 20211123   E. Dacillo                      XtendM3 Review (20211122)
+ * 20220124   E. Dacillo                      Fix MITALO Status when suffix is not 1
  */
 
 
@@ -158,8 +160,11 @@ public class Release extends ExtendM3Transaction {
     }
   }
 
+  /**
+   * updMHPICH - update MHPICH record
+   */
   private void updMHPICH(){
-    DBAction query = database.table("MHPICH").index("00").selectAllFields().build();
+    DBAction query = database.table("MHPICH").index("00").build();
     DBContainer MHPICH = query.createContainer();
     MHPICH.setInt("PICONO", XXCONO.toInteger());
     MHPICH.setLong("PIDLIX", inDLIX.toLong());
@@ -173,6 +178,9 @@ public class Release extends ExtendM3Transaction {
         message = "Update performed.";
         result.setInt("PIARLE", currentDate);
         result.setInt("PIARLF", currentTime);
+        result.set("PILMDT", currentDate);
+        result.set("PICHID", program.getUser());
+        result.set("PICHNO", result.getInt("PICHNO") + 1);
         result.update();
       } else {
         mi.error("Status is not 30.");
@@ -186,7 +194,7 @@ public class Release extends ExtendM3Transaction {
       rtvDPOL();
       logger.debug("Release: OQDPOL=${OQDPOL}/OQPIST=${OQPIST}/OQTTYP=${OQTTYP}/EDPCSP=${EDPCSP}/EDCPTM=${EDCPTM}/EDPRTA=${EDPRTA}/EDPIRL=${EDPIRL}/EDDOVA=${EDDOVA}")
       if (EDPCSP == 1) {
-        RPCS();
+        packageBasedPickingPerformSplit();
       }
     }
   }
@@ -251,9 +259,9 @@ public class Release extends ExtendM3Transaction {
   }
 
   /**
-   *    RPCS - Package Based Picking - perform split
+   *    packageBasedPickingPerformSplit - Package Based Picking - perform split (RPCS)
    */
-  public void RPCS() {
+  public void packageBasedPickingPerformSplit() {
     //=========================================
     //MWMNGPCS - RUPD
     // If return/indelivery
@@ -353,14 +361,14 @@ public class Release extends ExtendM3Transaction {
         queryDelMMWPCS.readAllLock(containerDelMMWPCS, 2, deleteMMWPCS);
         fromspltNoOfPac = false;
         if (EDPIRL != 2) {
-          CPSPLT(MHPICH);
+          calculatePackageBasedSplit(MHPICH);
         }
       } else {
-        CASPLT(MHPICH);
+        calculateAllocationBasedSplit(MHPICH);
       }
     } else {
       if (EDPRTA == 1) {
-        PRPIC(MHPICH);
+        performPickingList(MHPICH);
       }
     }
   }
@@ -414,13 +422,13 @@ public class Release extends ExtendM3Transaction {
     PIWHLO = recMHPICH.getString("PIWHLO").trim();
     PISLTP = recMHPICH.getString("PISLTP").trim();
     PIPISE = recMHPICH.getString("PIPISE").trim();
-    RRTV(recMHPICH);
+    retrievePickingCapacity(recMHPICH);
   }
 
   /**
-   *    RRTV   - Retrieve Picking capacity
+   *    retrievePickingCapacity   - Retrieve Picking capacity (RRTV)
    */
-  def void RRTV(DBContainer recMHPICH) {
+  def void retrievePickingCapacity(DBContainer recMHPICH) {
     String C3STAT = "";
     DBAction queryCROBJC = database.table("CROBJC")
       .index("00")
@@ -437,7 +445,7 @@ public class Release extends ExtendM3Transaction {
       //   Check matrix
       if (C3STAT == "20") {
         isDone = false;
-        CHKMTX(containerCROBJC);
+        checkPickingCapacitySelectionMatrixForMatch(containerCROBJC);
       }
     } else {
       return;
@@ -445,9 +453,9 @@ public class Release extends ExtendM3Transaction {
   }
 
   /**
-   *    CHKMTX - Check Picking capacity selection matrix for match
+   *    checkPickingCapacitySelectionMatrixForMatch - Check Picking capacity selection matrix for match (CHKMTX)
    */
-  def void CHKMTX(DBContainer recCROBJC) {
+  def void checkPickingCapacitySelectionMatrixForMatch(DBContainer recCROBJC) {
     //   Check sel. matrix prio.  0
     if (recCROBJC.getString("C3PC01").trim() != "") {
       XCPRIO = 0;
@@ -455,7 +463,7 @@ public class Release extends ExtendM3Transaction {
       XCPC20 = recCROBJC.getString("C3PCO2").trim();
       XCPC30 = recCROBJC.getString("C3PCO3").trim();
       XCPC40 = recCROBJC.getString("C3PCO4").trim();
-      CLPMTX();
+      findPickingCapacitySelectionMatrix();
     }
     //   Check sel. matrix prio. 1
     if (!isDone && recCROBJC.getString("C3PC11").trim() != "") {
@@ -464,7 +472,7 @@ public class Release extends ExtendM3Transaction {
       XCPC20 = recCROBJC.getString("C3PC12").trim();
       XCPC30 = recCROBJC.getString("C3PC13").trim();
       XCPC40 = recCROBJC.getString("C3PC14").trim();
-      CLPMTX();
+      findPickingCapacitySelectionMatrix();
     }
     //   Check sel. matrix prio. 2
     if (!isDone && recCROBJC.getString("C3PC21").trim() != "") {
@@ -473,7 +481,7 @@ public class Release extends ExtendM3Transaction {
       XCPC20 = recCROBJC.getString("C3PC22").trim();
       XCPC30 = recCROBJC.getString("C3PC23").trim();
       XCPC40 = recCROBJC.getString("C3PC24").trim();
-      CLPMTX();
+      findPickingCapacitySelectionMatrix();
     }
     //   Check sel. matrix prio. 3
     if (!isDone && recCROBJC.getString("C3PC31").trim() != "") {
@@ -482,7 +490,7 @@ public class Release extends ExtendM3Transaction {
       XCPC20 = recCROBJC.getString("C3PC32").trim();
       XCPC30 = recCROBJC.getString("C3PC33").trim();
       XCPC40 = recCROBJC.getString("C3PC34").trim();
-      CLPMTX();
+      findPickingCapacitySelectionMatrix();
     }
     //   Check sel. matrix prio. 4
     if (!isDone && recCROBJC.getString("C3PC41").trim() != "") {
@@ -491,7 +499,7 @@ public class Release extends ExtendM3Transaction {
       XCPC20 = recCROBJC.getString("C3PC42").trim();
       XCPC30 = recCROBJC.getString("C3PC43").trim();
       XCPC40 = recCROBJC.getString("C3PC44").trim();
-      CLPMTX();
+      findPickingCapacitySelectionMatrix();
     }
     //   Check sel. matrix prio. 5
     if (!isDone && recCROBJC.getString("C3PC51").trim() != "") {
@@ -500,7 +508,7 @@ public class Release extends ExtendM3Transaction {
       XCPC20 = recCROBJC.getString("C3PC52").trim();
       XCPC30 = recCROBJC.getString("C3PC53").trim();
       XCPC40 = recCROBJC.getString("C3PC54").trim();
-      CLPMTX();
+      findPickingCapacitySelectionMatrix();
     }
     //   Check sel. matrix prio. 6
     if (!isDone && recCROBJC.getString("C3PC61").trim() != "") {
@@ -509,7 +517,7 @@ public class Release extends ExtendM3Transaction {
       XCPC20 = recCROBJC.getString("C3PC62").trim();
       XCPC30 = recCROBJC.getString("C3PC63").trim();
       XCPC40 = recCROBJC.getString("C3PC64").trim();
-      CLPMTX();
+      findPickingCapacitySelectionMatrix();
     }
     //   Check sel. matrix prio. 7
     if (!isDone && recCROBJC.getString("C3PC71").trim() != "") {
@@ -518,7 +526,7 @@ public class Release extends ExtendM3Transaction {
       XCPC20 = recCROBJC.getString("C3PC72").trim();
       XCPC30 = recCROBJC.getString("C3PC73").trim();;
       XCPC40 = recCROBJC.getString("C3PC74").trim();
-      CLPMTX();
+      findPickingCapacitySelectionMatrix();
     }
     //   Check sel. matrix prio. 8
     if (!isDone && recCROBJC.getString("C3PC81").trim() != "") {
@@ -527,7 +535,7 @@ public class Release extends ExtendM3Transaction {
       XCPC20 = recCROBJC.getString("C3PC82").trim();
       XCPC30 = recCROBJC.getString("C3PC83").trim();
       XCPC40 = recCROBJC.getString("C3PC84").trim();
-      CLPMTX();
+      findPickingCapacitySelectionMatrix();
     }
     //   Check sel. matrix prio. 9
     if (!isDone && recCROBJC.getString("C3PC91").trim() != "") {
@@ -536,36 +544,36 @@ public class Release extends ExtendM3Transaction {
       XCPC20 = recCROBJC.getString("C3PC92").trim();
       XCPC30 = recCROBJC.getString("C3PC93").trim();
       XCPC40 = recCROBJC.getString("C3PC94").trim();
-      CLPMTX();
+      findPickingCapacitySelectionMatrix();
     }
   }
 
   /**
-   *    CLPMTX - Find Picking capacity selection matrix
+   *    findPickingCapacitySelectionMatrix - Find Picking capacity selection matrix (CLPMTX)
    */
-  def boolean CLPMTX() {
+  def boolean findPickingCapacitySelectionMatrix() {
     XCOBV1 = "";
     XCOBV2 = "";
     XCOBV3 = "";
     XCOBV4 = "";
     if (XCPC10 != "") {
       XOBFLD = XCPC10;
-      SETOBV();
+      setObjValuesForLoadingPlatformMatrix();
       XCOBV1 = XOBVAL;
     }
     if (XCPC20 != "") {
       XOBFLD = XCPC20;
-      SETOBV();
+      setObjValuesForLoadingPlatformMatrix();
       XCOBV2 = XOBVAL;
     }
     if (XCPC30 != "") {
       XOBFLD = XCPC30;
-      SETOBV();
+      setObjValuesForLoadingPlatformMatrix();
       XCOBV3 = XOBVAL;
     }
     if (XCPC40 != "") {
       XOBFLD = XCPC40;
-      SETOBV();
+      setObjValuesForLoadingPlatformMatrix();
       XCOBV4 = XOBVAL;
     }
 
@@ -620,9 +628,9 @@ public class Release extends ExtendM3Transaction {
   }
 
   /**
-   *    SETOBV - Set obj. values for loading platform matrix
+   *    setObjValuesForLoadingPlatformMatrix - Set obj. values for loading platform matrix (SETOBV)
    */
-  def void SETOBV() {
+  def void setObjValuesForLoadingPlatformMatrix() {
     switch (0) {
       default:
         if (XOBFLD == "PIWHLO") {
@@ -699,7 +707,7 @@ public class Release extends ExtendM3Transaction {
             updatePackInfo = true;
             lineUpdate = true;
             PAKCNT--;
-            RSPLIT(recMHPICH, recMITALO30);
+            splitLineMHPICHMITALO(recMHPICH, recMITALO30);
             // Delete last written record
             Closure<?> deleteMMWPCS = { LockedResult lockedResult ->
               lockedResult.delete();
@@ -815,13 +823,17 @@ public class Release extends ExtendM3Transaction {
       lockedResult.set("MQALQT", recMITALO.getDouble("MQALQT") - recMFTRND.getDouble("O0DLQT"));
       lockedResult.set("MQPAQT", recMITALO.getDouble("MQPAQT") - recMFTRND.getDouble("O0DLQT"));
       lockedResult.set("MQTRQT", recMITALO.getDouble("MQTRQT") - recMFTRND.getDouble("O0DLQT"));
+      logger.debug("reduceQtyMITALO80 updateMITALO2: MQPLSX=${lockedResult.get("MQPLSX")}/${lockedResult.getString("MQSTAT").trim()}/");
+      if (lockedResult.getString("MQSTAT").trim() == "") {
+        lockedResult.set("MQSTAT", inPISS);
+      }
       lockedResult.set("MQLMDT", currentDate);
       lockedResult.set("MQCHID", program.getUser());
       lockedResult.set("MQCHNO", lockedResult.getInt("MQCHNO") + 1);
       lockedResult.update();
       newPLRN = Long.parseLong(lockedResult.get("MQPLRN").toString().trim());
       if (recMITALO.getDouble("MQCAWE") != 0 && MMCAWP == 0) {
-        RCAWE(recMITALO);
+        retrieveCatchWeight(recMITALO);
       }
     }
     DBAction queryMITALO2 = database.table("MITALO")
@@ -866,13 +878,17 @@ public class Release extends ExtendM3Transaction {
       lockedResult.set("MQALQT", recMITALO.getDouble("MQALQT") + recMFTRND.getDouble("O0DLQT"));
       lockedResult.set("MQPAQT", recMITALO.getDouble("MQPAQT") + recMFTRND.getDouble("O0DLQT"));
       lockedResult.set("MQTRQT", recMITALO.getDouble("MQTRQT") + recMFTRND.getDouble("O0DLQT"));
+      logger.debug("addQtyMITALO80 updateMITALO3:MQPLSX=${lockedResult.get("MQPLSX")}/${lockedResult.getString("MQSTAT").trim()}/");
+      if (lockedResult.getString("MQSTAT").trim() == "") {
+        lockedResult.set("MQSTAT", inPISS);
+      }
       lockedResult.set("MQLMDT", currentDate);
       lockedResult.set("MQCHID", program.getUser());
       lockedResult.set("MQCHNO", lockedResult.getInt("MQCHNO") + 1);
       lockedResult.update();
       newPLRN = Long.parseLong(lockedResult.get("MQPLRN").toString().trim());
       if (recMITALO.getDouble("MQCAWE") != 0 && MMCAWP == 0) {
-        RCAWE(recMITALO);
+        retrieveCatchWeight(recMITALO);
       }
     }
 
@@ -904,20 +920,24 @@ public class Release extends ExtendM3Transaction {
       containerMITALO.set("MQALQT", recMFTRND.getDouble("O0DLQT"));
       containerMITALO.set("MQPAQT", recMFTRND.getDouble("O0DLQT"));
       containerMITALO.set("MQTRQT", recMFTRND.getDouble("O0DLQT"));
-      newPLRN = Long.parseLong(PLRN());
+      logger.debug("addQtyMITALO80 insert:MQPLSX=${XXPLSX}/${containerMITALO.getString("MQSTAT").trim()}/");
+      if (containerMITALO.getString("MQSTAT").trim() == "") {
+        containerMITALO.set("MQSTAT", inPISS);
+      }
+      newPLRN = Long.parseLong(retrieveReportingNumber());
       containerMITALO.set("MQPLRN", newPLRN);
       queryMITALO2.insert(containerMITALO);
       if (recMITALO.getDouble("MQCAWE") != 0 && MMCAWP == 0) {
-        containerMITALO.set("MQCAWE", RCAWE(recMITALO));
+        containerMITALO.set("MQCAWE", retrieveCatchWeight(recMITALO));
       }
     }
     return newPLRN;
   }
 
   /**
-   *    RCAWE - Retrieve catch weight
+   *    retrieveCatchWeight - Retrieve catch weight (RCAWE)
    */
-  def double RCAWE(DBContainer recMITALO) {
+  def double retrieveCatchWeight(DBContainer recMITALO) {
     String PXWHLO = recMITALO.get("MQWHLO");
     String PXITNO = recMITALO.get("MQITNO");
     String PXBANO = recMITALO.get("MQBANO");
@@ -978,7 +998,7 @@ public class Release extends ExtendM3Transaction {
         //   Calculate catch weight
         //   Withdrawal
         //   Calculate from MILOMC
-        PXCAWE = CLCILO(recMITALO, PPUN, CWUN, UNMS, CAWP, DCCD, PXTRQT);
+        PXCAWE = calculateCatchWeightFromMILOMC(recMITALO, PPUN, CWUN, UNMS, CAWP, DCCD, PXTRQT);
       }
       //   Indelivery
       if (PXCAWE == 0) {
@@ -1002,7 +1022,7 @@ public class Release extends ExtendM3Transaction {
           PXTTYP == 97 && PXTRQT > 0 ||
           PXTTYP == 98 && PXTRQT > 0) {
           //   Calculate from MITAUN
-          PXCAWE = CLCAUN(recMITALO, PPUN, CWUN, UNMS, CAWP, DCCD, PXTRQT);
+          PXCAWE = calculateCatchWeightFromMITAUN(recMITALO, PPUN, CWUN, UNMS, CAWP, DCCD, PXTRQT);
         }
       }
     }
@@ -1010,9 +1030,9 @@ public class Release extends ExtendM3Transaction {
   }
 
   /**
-   *    CLCAUN - Calculate catch weight from MITAUN
+   *    calculateCatchWeightFromMITAUN - Calculate catch weight from MITAUN (CLCAUN)
    */
-  def double CLCAUN(DBContainer recMITALO, String PPUN, String CWUN, String UNMS, int CAWP, int DCCD, double PXTRQT) {
+  def double calculateCatchWeightFromMITAUN(DBContainer recMITALO, String PPUN, String CWUN, String UNMS, int CAWP, int DCCD, double PXTRQT) {
     double PXCAWE = PXTRQT;
     int MUDCCD = DCCD;
     double MUCOFA = 1d;
@@ -1058,9 +1078,9 @@ public class Release extends ExtendM3Transaction {
   }
 
   /**
-   *    CLCILO - Calculate catch weight from MILOMC
+   *    calculateCatchWeightFromMILOMC - Calculate catch weight from MILOMC (CLCILO)
    */
-  def double CLCILO(DBContainer recMITALO, String PPUN, String CWUN, String UNMS, int CAWP, int DCCD, double PXTRQT) {
+  def double calculateCatchWeightFromMILOMC(DBContainer recMITALO, String PPUN, String CWUN, String UNMS, int CAWP, int DCCD, double PXTRQT) {
     double PXCAWE = 0d;
     double XSLASK = 0d;
     double XSLAS1 = 0d;
@@ -1290,7 +1310,7 @@ public class Release extends ExtendM3Transaction {
       lockedResult.update();
       // Print pick list
       if (EDPRTA == 1 && EDPIRL == 2) {
-        PRPIC(lockedResult);
+        performPickingList(lockedResult);
       }
     }
     DBAction queryMHPICH = database.table("MHPICH")
@@ -1304,9 +1324,9 @@ public class Release extends ExtendM3Transaction {
   }
 
   /**
-   *    PRPIC - Perform PickingList
+   *    performPickingList - Perform PickingList (PRPIC)
    */
-  def void PRPIC(DBContainer recMHPICH) {
+  def void performPickingList(DBContainer recMHPICH) {
     String xrand = getRandomNum();
 
     DBAction query = database.table("MITDPR")
@@ -1336,16 +1356,16 @@ public class Release extends ExtendM3Transaction {
       container.set("MPPGNM", MPPGNM);
     }
     if (query.insert(container)) {
-      R972(xrand, recMHPICH.getString("PIWHLO"), MPPGNM);
+      writeMMW972(xrand, recMHPICH.getString("PIWHLO"), MPPGNM);
     }
   }
 
   /**
-   * R972 - write MMW972
+   * writeMMW972 - write MMW972 (R972)
    * @param xrand
    * @param whlo
    */
-  def void R972(String xrand, String whlo, String MPPGNM) {
+  def void writeMMW972(String xrand, String whlo, String MPPGNM) {
     DBAction ActionMW972 = database.table("MMW972").build();
     DBContainer MW972 = ActionMW972.getContainer();
     MW972.set("J2CONO", XXCONO.toInteger());
@@ -1375,9 +1395,9 @@ public class Release extends ExtendM3Transaction {
   }
 
   /**
-   *    CPSPLT  - Calculate package based split
+   *    calculatePackageBasedSplit  - Calculate package based split (CPSPLT)
    */
-  public void CPSPLT(DBContainer recMHPICH) {
+  public void calculatePackageBasedSplit(DBContainer recMHPICH) {
     // Level breaks
     breakOnLine = false;
     breakOnPackage = false;
@@ -1405,7 +1425,7 @@ public class Release extends ExtendM3Transaction {
         if (containerMITALO.getInt("MQPLSX") == XSPLSX) {
           // Split on single package - create next suffix and reset counts
           if (breakOnPackage) {
-            UPLSX(recMHPICH);
+            updatePickingListStatus(recMHPICH);
             breakOnPackage = false;
             LINCNT = 0;
             PAKCNT = 0;
@@ -1427,7 +1447,7 @@ public class Release extends ExtendM3Transaction {
             XXPCSI = 5;
             breakOnLine = true;
             lineUpdate = true;
-            RSPLIT(recMHPICH, record);
+            splitLineMHPICHMITALO(recMHPICH, record);
             breakOnLine = false;
           } else {
             // Break already hit - update all subsequent lines
@@ -1442,7 +1462,7 @@ public class Release extends ExtendM3Transaction {
             if (breakOnPackage) {
               updatePackInfo = true;
               lineUpdate = true;
-              RSPLIT(recMHPICH, record);
+              splitLineMHPICHMITALO(recMHPICH, record);
               breakOnPackage = false;
             }
             double O0DLQT = recMFTRND10.getDouble("O0DLQT");
@@ -1450,7 +1470,7 @@ public class Release extends ExtendM3Transaction {
             //   Retrieve item
             getItemDtls(record.getString("MQITNO").trim());
             if (EDCPTM == 1) {
-              CPTM(record, O0DLQT);
+              calculatePickingTime(record, O0DLQT);
               TIMCNT += XXNUM;
               TIMWCT += XXNUM;
             }
@@ -1477,7 +1497,7 @@ public class Release extends ExtendM3Transaction {
                   PKVOL3 -= XXVOL3;
                   PAKCNT--;
                   // Create next suffix and prime next MITALO record
-                  RSPLIT(recMHPICH, record);
+                  splitLineMHPICHMITALO(recMHPICH, record);
                   updMFTRND_PLRN(recMFTRND10, record.getLong("MQPLRN"));
                   // Restore current totals
                   PKDLQT += O0DLQT;
@@ -1505,7 +1525,7 @@ public class Release extends ExtendM3Transaction {
                   PKVOL3 -= XXVOL3;
                   PAKCNT--;
                   // Create next suffix and prime next MITALO record
-                  RSPLIT(recMHPICH, record);
+                  splitLineMHPICHMITALO(recMHPICH, record);
                   updMFTRND_PLRN(recMFTRND10, record.getLong("MQPLRN"));
                   // Restore current totals
                   PKDLQT += O0DLQT;
@@ -1536,7 +1556,7 @@ public class Release extends ExtendM3Transaction {
                   PKVOL3 -= XXVOL3;
                   PAKCNT--;
                   // Create next suffix and prime next MITALO record
-                  RSPLIT(recMHPICH, record);
+                  splitLineMHPICHMITALO(recMHPICH, record);
                   updMFTRND_PLRN(recMFTRND10, record.getLong("MQPLRN"));
                   // Restore current totals
                   PKDLQT += O0DLQT;
@@ -1579,6 +1599,9 @@ public class Release extends ExtendM3Transaction {
       Closure<?> updateMHPICH = { LockedResult lockedResult ->
         lockedResult.set("PINPLL", LINCNT);
         lockedResult.set("PIPLTM", TIMCNT);
+        lockedResult.set("PILMDT", currentDate);
+        lockedResult.set("PICHNO", lockedResult.getInt("PICHNO") + 1);
+        lockedResult.set("PICHID", program.getUser());
         lockedResult.update();
       }
       DBAction queryMHPICH = database.table("MHPICH")
@@ -1623,6 +1646,10 @@ public class Release extends ExtendM3Transaction {
    */
   def updSubLines(DBContainer recMITALO, DBContainer recMHPICH) {
     Closure<?> updateMITALO = { LockedResult lockedResult ->
+      logger.debug("updSubLines:PLSX=${recMHPICH.getInt("PIPLSX")}/${lockedResult.getString("MQSTAT").trim()}/");
+      if (lockedResult.getString("MQSTAT").trim() == "") {
+        lockedResult.set("MQSTAT", inPISS);
+      }
       lockedResult.set("MQPLSX", recMHPICH.getInt("PIPLSX"));
       lockedResult.set("MQLMDT", currentDate);
       lockedResult.set("MQCHID", program.getUser());
@@ -1719,7 +1746,11 @@ public class Release extends ExtendM3Transaction {
       lockedResult.set("MQPAQT", PKDLQT);
       lockedResult.set("MQALQN", 0D);
       if (lockedResult.getDouble("MQCAWE") != 0 && MMCAWP == 0) {
-        lockedResult.set("MQCAWE", RCAWE(lockedResult));
+        lockedResult.set("MQCAWE", retrieveCatchWeight(lockedResult));
+      }
+      logger.debug("updOutstandingQty=${lockedResult.getString("MQSTAT").trim()}/");
+      if (lockedResult.getString("MQSTAT").trim() == "") {
+        lockedResult.set("MQSTAT", inPISS);
       }
       // Adjust existing allocation line
       lockedResult.set("MQLMDT", currentDate);
@@ -1750,20 +1781,20 @@ public class Release extends ExtendM3Transaction {
   }
 
   /**
-   *    RSPLIT   - Split line MHPICH MITALO
+   *    splitLineMHPICHMITALO   - Split line MHPICH MITALO (RSPLIT)
    */
-  def void RSPLIT(DBContainer recMHPICH, DBContainer recMITALO) {
-    logger.debug("RSPLIT: packageCheck=${packageCheck}/breakOnLine=${breakOnLine}/fromspltNoOfPac=${fromspltNoOfPac}")
+  def void splitLineMHPICHMITALO(DBContainer recMHPICH, DBContainer recMITALO) {
+    logger.debug("splitLineMHPICHMITALO: packageCheck=${packageCheck}/breakOnLine=${breakOnLine}/fromspltNoOfPac=${fromspltNoOfPac}")
     // Next suffix
-    UPLSX(recMHPICH);
+    updatePickingListStatus(recMHPICH);
     // Allocation adjustment
     if (packageCheck || breakOnLine) {
       if (!fromspltNoOfPac) {
         boolean isFirstRecord = true;
         Closure<?> getRecord = { DBContainer record ->
           if (isFirstRecord) {
-            logger.debug("RSPLIT=${record}");
-            UALO(recMITALO, record);
+            logger.debug("splitLineMHPICHMITALO=${record}");
+            updateAllocations(recMITALO, record);
             isFirstRecord = false;
           }
         }
@@ -1800,11 +1831,11 @@ public class Release extends ExtendM3Transaction {
   }
 
   /**
-   *    UPLSX  - Update Pickinglist status
+   *    updatePickingListStatus  - Update Pickinglist status (UPLSX)
    */
-  def void UPLSX(DBContainer recMHPICH) {
+  def void updatePickingListStatus(DBContainer recMHPICH) {
     // None package based split. Only increment pick list suffix if further MITALO records to process
-    logger.debug("UPLSX:packageCheck=${packageCheck}/TOTCNT=${TOTCNT}/XXNPLL=${XXNPLL}/LINCNT=${LINCNT}")
+    logger.debug("updatePickingListStatus:packageCheck=${packageCheck}/TOTCNT=${TOTCNT}/XXNPLL=${XXNPLL}/LINCNT=${LINCNT}")
     if (packageCheck ||
       !packageCheck &&
       TOTCNT < XXNPLL ||
@@ -1813,7 +1844,10 @@ public class Release extends ExtendM3Transaction {
       LINCNT > 1) {
       Closure<?> updMHDISH = { LockedResult lockedResult ->
         lockedResult.set("OQPLSX", lockedResult.getInt("OQPLSX") + 1);
-        lockedResult.update()
+        lockedResult.set("OQLMDT", currentDate);
+        lockedResult.set("OQCHNO", lockedResult.getInt("OQCHNO") + 1);
+        lockedResult.set("OQCHID", program.getUser());
+        lockedResult.update();
       }
       DBAction query = database.table("MHDISH")
         .index("00")
@@ -1825,15 +1859,15 @@ public class Release extends ExtendM3Transaction {
       query.readLock(container, updMHDISH);
     }
     // Create Picklist Header
-    UPICH(recMHPICH);
+    updatePickingListHeader(recMHPICH);
   }
 
   /**
-   *    UPICH  - Update Pickinglist Header
+   *    updatePickingListHeader  - Update Pickinglist Header (UPICH)
    */
-  public void UPICH(DBContainer recMHPICH) {
-    logger.debug("UPICH=${recMHPICH}");
-    logger.debug("UPICH breakOnLine=${breakOnLine}/LINCNT=${LINCNT}/PKDLQT=${PKDLQT}/packageCheck=${packageCheck}/inTEAM=${inTEAM}/inPICK=${inPICK}")
+  public void updatePickingListHeader(DBContainer recMHPICH) {
+    logger.debug("updatePickingListHeader=${recMHPICH}");
+    logger.debug("updatePickingListHeader breakOnLine=${breakOnLine}/LINCNT=${LINCNT}/PKDLQT=${PKDLQT}/packageCheck=${packageCheck}/inTEAM=${inTEAM}/inPICK=${inPICK}")
     Closure<?> updMHPICH = { LockedResult lockedResult ->
       // Break level is at MITALO level lines equals line count minus current record
       if (breakOnLine &&
@@ -1887,6 +1921,9 @@ public class Release extends ExtendM3Transaction {
         lockedResult.set("PICLPT", 0d);
       }
       lockedResult.set("PIPCSI", XXPCSI);
+      lockedResult.set("PICHNO", lockedResult.getInt("PICHNO") + 1);
+      lockedResult.set("PICHID", program.getUser());
+      lockedResult.set("PILMDT", currentDate);
       lockedResult.update();
     }
     DBAction query = database.table("MHPICH")
@@ -1899,7 +1936,7 @@ public class Release extends ExtendM3Transaction {
     query.readLock(container, updMHPICH);
     // Print pick list
     if (EDPRTA == 1) {
-      PRPIC(recMHPICH);
+      performPickingList(recMHPICH);
     }
     DBAction queryMHDISH = database.table("MHDISH")
       .index("00")
@@ -1911,7 +1948,7 @@ public class Release extends ExtendM3Transaction {
     containerMHDISH.set("OQDLIX", recMHPICH.getLong("PIDLIX"));
     queryMHDISH.read(containerMHDISH);
     int OQPLSX = containerMHDISH.getInt("OQPLSX");
-    logger.debug("UPICH:OQPLSX=${OQPLSX}/packageCheck=${packageCheck}")
+    logger.debug("updatePickingListHeader:OQPLSX=${OQPLSX}/packageCheck=${packageCheck}")
 
     //Read again to retrieve current values
     DBAction queryMHPICH = database.table("MHPICH")
@@ -1976,7 +2013,7 @@ public class Release extends ExtendM3Transaction {
       query.insert(container);
     } else {
       // None package based split. Only prime next pick header record if further MITALO records to process
-      logger.debug("UPICH nonepackage TOTCNT=${TOTCNT}/XXNPLL=${XXNPLL}/LINCNT=${LINCNT}")
+      logger.debug("updatePickingListHeader nonepackage TOTCNT=${TOTCNT}/XXNPLL=${XXNPLL}/LINCNT=${LINCNT}")
       if (TOTCNT < XXNPLL ||
         TOTCNT == XXNPLL &&
         LINCNT > 1) {
@@ -2036,9 +2073,10 @@ public class Release extends ExtendM3Transaction {
   }
 
   /**
-   *    UALO  - Update Allocations
+   *    updateAllocations  - Update Allocations (UALO)
    */
-  def void UALO(DBContainer recMITALO, DBContainer recMHPICH) {
+  def void updateAllocations(DBContainer recMITALO, DBContainer recMHPICH) {
+    logger.debug("updateAllocations===${recMITALO}/${recMHPICH}/${breakOnLine}/${PKDLQT}")
     Closure<?> updateMITALO = { LockedResult lockedResult ->
       // Break level is at MITALO level simply adjust pick list suffix
       if (breakOnLine || PKDLQT == 0) {
@@ -2100,6 +2138,11 @@ public class Release extends ExtendM3Transaction {
         containerMITALO.set("MQAUCZ", lockedResult.get("MQAUCZ"));
         containerMITALO.set("MQORRN", lockedResult.get("MQORRN"));
         containerMITALO.set("MQSUME", lockedResult.get("MQSUME"));
+        logger.debug("updateAllocations insert:MQPLSX=${containerMITALO.get("MQPLSX")}/${lockedResult.getString("MQSTAT").trim()}/${inPISS}/${(lockedResult.getString("MQSTAT").trim() == "")}");
+        logger.debug("updateAllocations insert:MQPLSX=${containerMITALO.get("MQPLSX")}/${ containerMITALO.get("MQSTAT")}/");
+        if (containerMITALO.getString("MQSTAT").trim() == "") {
+          containerMITALO.set("MQSTAT", inPISS);
+        }
         queryMITALO.insert(containerMITALO);
 
 //        if (LINCNT > 1) {
@@ -2116,12 +2159,18 @@ public class Release extends ExtendM3Transaction {
         lockedResult.set("MQALQN", 0D);
         // Catchweight
         if (lockedResult.getDouble("MQCAWE") != 0 && MMCAWP == 0) {
-          lockedResult.set("MQCAWE", RCAWE(lockedResult));
+          lockedResult.set("MQCAWE", retrieveCatchWeight(lockedResult));
         }
         // ACP no longer used
         lockedResult.set("MQTRQA", 0D);
         lockedResult.set("MQALQA", 0D);
         lockedResult.set("MQPAQA", 0D);
+
+        logger.debug("updateAllocations update MQPLSX=${lockedResult.get("MQPLSX")}/${lockedResult.getString("MQSTAT").trim()}/${inPISS}/${(lockedResult.getString("MQSTAT").trim() == "")}");
+        if (lockedResult.getString("MQSTAT").trim() == "") {
+          lockedResult.set("MQSTAT", inPISS);
+        }
+
         // Adjust existing allocation line
         lockedResult.update();
         DBAction queryMITALO = database.table("MITALO")
@@ -2143,7 +2192,7 @@ public class Release extends ExtendM3Transaction {
         containerMITALO.set("MQRIDX", recMITALO.getInt("MQRIDX"));
         containerMITALO.set("MQSOFT", recMITALO.getInt("MQSOFT"));
         // Retrieve reporting number
-        containerMITALO.set("MQPLRN", PLRN());
+        containerMITALO.set("MQPLRN", retrieveReportingNumber());
         // Next pick list suffix
         containerMITALO.set("MQPLSX", recMHPICH.getInt("PIPLSX"));
         containerMITALO.set("MQTRQT", 0D);
@@ -2151,6 +2200,10 @@ public class Release extends ExtendM3Transaction {
         containerMITALO.set("MQPAQT", 0D);
         containerMITALO.set("MQALQN", 0D);
         containerMITALO.set("MQCAWE", 0D);
+        logger.debug("updateAllocations insert=${recMITALO.getString("MQSTAT").trim()}/");
+        if (recMITALO.getString("MQSTAT").trim() == "") {
+          containerMITALO.set("MQSTAT", inPISS);
+        }
         // Initialise next allocation line
         splitPerformed = true;
         queryMITALO.insert(containerMITALO);
@@ -2178,9 +2231,9 @@ public class Release extends ExtendM3Transaction {
   }
 
   /**
-   *    PLRN  - Retrieve reporting number
+   *    retrieveReportingNumber  - Retrieve reporting number (PLRN)
    */
-  def String PLRN() {
+  def String retrieveReportingNumber() {
     String PXNBNR = "";
     def params = ["NBTY": "S1", "NBID": "A"];
     Closure<?> handler = {Map<String,String> response ->
@@ -2192,9 +2245,9 @@ public class Release extends ExtendM3Transaction {
   }
 
   /**
-   *    CPTM  - Calculate pickingtime
+   *    calculatePickingTime - Calculate pickingtime (CPTM)
    */
-  public void CPTM(DBContainer recMITALO, double O0DLQT) {
+  public void calculatePickingTime(DBContainer recMITALO, double O0DLQT) {
     //   Retrieve stock location information
     String MQWHLO = recMITALO.getString("MQWHLO").trim();
     String MQWHSL = recMITALO.getString("MQWHSL").trim();
@@ -2329,9 +2382,9 @@ public class Release extends ExtendM3Transaction {
   }
 
   /**
-   *    CASPLT  - Calculate allocation based split
+   *    calculateAllocationBasedSplit  - Calculate allocation based split (CASPLT)
    */
-  def void CASPLT(DBContainer recMHPICH) {
+  def void calculateAllocationBasedSplit(DBContainer recMHPICH) {
     // Level breaks
     breakOnLine = true;
     breakOnTime = false;
@@ -2349,13 +2402,13 @@ public class Release extends ExtendM3Transaction {
       orgITALOPLSX = recMITALO30.getInt("MQPLSX");
       LINCNT++;
       TOTCNT++;
-      logger.debug("CASPLT:checkPickLines=${checkPickLines}/LINCNT=${MCMXPL}/lineUpdate=${lineUpdate}/XXNPLL=${XXNPLL}");
+      logger.debug("calculateAllocationBasedSplit:checkPickLines=${checkPickLines}/LINCNT=${MCMXPL}/lineUpdate=${lineUpdate}/XXNPLL=${XXNPLL}");
       // Perform line break check
       if (checkPickLines &&
         LINCNT > MCMXPL) {
         XXPCSI = 15;
         lineUpdate = true;
-        RSPLIT(recMHPICH, recMITALO30);
+        splitLineMHPICHMITALO(recMHPICH, recMITALO30);
       } else {
         // Break already hit - update all subsequent lines
         if (lineUpdate) {
@@ -2366,9 +2419,9 @@ public class Release extends ExtendM3Transaction {
       restoreValues = false;
       //   Retrieve item
       getItemDtls(recMITALO30.getString("MQITNO"));
-      logger.debug("CASPLT:EDCPTM=${EDCPTM}");
+      logger.debug("calculateAllocationBasedSplit:EDCPTM=${EDCPTM}");
       if (EDCPTM == 1) {
-        CPTM(recMITALO30, 0);
+        calculatePickingTime(recMITALO30, 0);
         TIMCNT += XXNUM;
         TIMWCT += XXNUM;
       }
@@ -2377,7 +2430,7 @@ public class Release extends ExtendM3Transaction {
       PKGRWE += XXGRWE;
       PKVOL3 += XXVOL3;
       // Weight
-      logger.debug("CASPLT:checkItemWeight=${checkItemWeight}/PKGRWE=${PKGRWE}/MCMXPW=${MCMXPW}");
+      logger.debug("calculateAllocationBasedSplit:checkItemWeight=${checkItemWeight}/PKGRWE=${PKGRWE}/MCMXPW=${MCMXPW}");
       if (checkItemWeight) {
         if (PKGRWE > MCMXPW) {
           XXPCSI = 12;
@@ -2392,7 +2445,7 @@ public class Release extends ExtendM3Transaction {
             PKVOL3 -= XXVOL3;
           }
           // Create next suffix and prime next MITALO record
-          RSPLIT(recMHPICH, recMITALO30);
+          splitLineMHPICHMITALO(recMHPICH, recMITALO30);
           if (restoreValues) {
             restoreValues = false;
             // Restore current totals
@@ -2403,7 +2456,7 @@ public class Release extends ExtendM3Transaction {
         }
       }
       // Volume
-      logger.debug("CASPLT:checkItemVolume=${checkItemVolume}/breakOnWeight=${breakOnWeight}/PKVOL3=${PKVOL3}/MCMXPV=${MCMXPV}")
+      logger.debug("calculateAllocationBasedSplit:checkItemVolume=${checkItemVolume}/breakOnWeight=${breakOnWeight}/PKVOL3=${PKVOL3}/MCMXPV=${MCMXPV}")
       if (checkItemVolume && !breakOnWeight) {
         if (PKVOL3 > MCMXPV) {
           XXPCSI = 13;
@@ -2418,7 +2471,7 @@ public class Release extends ExtendM3Transaction {
             PKVOL3 -= XXVOL3;
           }
           // Create next suffix and prime next MITALO record
-          RSPLIT(recMHPICH, recMITALO30);
+          splitLineMHPICHMITALO(recMHPICH, recMITALO30);
           if (restoreValues) {
             restoreValues = false;
             // Restore current totals
@@ -2446,7 +2499,7 @@ public class Release extends ExtendM3Transaction {
             PKVOL3 -= XXVOL3;
           }
           // Create next suffix and prime next MITALO record
-          RSPLIT(recMHPICH, recMITALO30);
+          splitLineMHPICHMITALO(recMHPICH, recMITALO30);
           if (restoreValues) {
             restoreValues = false;
             // Restore current totals
@@ -2503,7 +2556,7 @@ public class Release extends ExtendM3Transaction {
       // Update last MHPICH - execute even if no split performed
       updLastMHPICH_CASPLT(recMHPICH);
       if (EDPRTA == 1 && !picklistPrintJob) {
-        PRPIC(recMHPICH);
+        performPickingList(recMHPICH);
       }
     }
   }
@@ -2547,7 +2600,7 @@ public class Release extends ExtendM3Transaction {
       lockedResult.update();
       // Print pick list
       if (EDPRTA == 1 && EDPIRL == 2) {
-        PRPIC(lockedResult);
+        performPickingList(lockedResult);
       }
     }
     DBAction queryMHPICH = database.table("MHPICH")
