@@ -9,6 +9,8 @@
  * 20211012   E. Dacillo                      Add reference to MWMNGPCS
  * 20211123   E. Dacillo                      XtendM3 Review (20211122)
  * 20220124   E. Dacillo                      Fix MITALO Status when suffix is not 1
+ * 20220228   E. Dacillo                      correct split suffix issue - 16155039
+ * 20220422   E. Dacillo                      correct split suffix issue - 16155039
  */
 
 
@@ -282,6 +284,9 @@ public class Release extends ExtendM3Transaction {
     }
     // Check picking status on the dispatch header. No package break if not started
     packageCheck = false;
+
+    logger.debug("packageBasedPickingPerformSplit OQPIST=${OQPIST}");
+
     if (OQPIST.toInteger() >= 30) {
       packageCheck = true;
     } else {
@@ -343,7 +348,7 @@ public class Release extends ExtendM3Transaction {
       checkPickTime = true;
       checkForSplit = true;
     }
-    logger.debug("release: checkForSplit=${checkForSplit}/packageCheck=${packageCheck}/XXNPLL=${XXNPLL}")
+    logger.debug("packageBasedPickingPerformSplit release: checkForSplit=${checkForSplit}/packageCheck=${packageCheck}/XXNPLL=${XXNPLL}/EDPRTA=${EDPRTA}/checkPickLines=${checkPickLines}")
     // Checks to be made - determine whether package based or allocation based
     if (checkForSplit) {
       if (packageCheck) {
@@ -364,7 +369,8 @@ public class Release extends ExtendM3Transaction {
           calculatePackageBasedSplit(MHPICH);
         }
       } else {
-        calculateAllocationBasedSplit(MHPICH);
+        logger.debug("packageBasedPickingPerformSplit call calculateAllocationBasedSplit");
+        calculateAllocationBasedSplit(MHPICH);//EDZ END
       }
     } else {
       if (EDPRTA == 1) {
@@ -676,6 +682,12 @@ public class Release extends ExtendM3Transaction {
       orgITALOPLRI = recMITALO30.getString("MQPLRI");
       // Adjust reporting number on MFTRND
       updatePackInfo = false;
+      //Retrieve latest MHPICH  //A 20220304
+      List<DBContainer> lstMHPICH = readCurrentMHPICH(recMHPICH);  //A 20220304
+      for (DBContainer recCurMHPICH: lstMHPICH) {
+        recMHPICH = recCurMHPICH;
+        break;
+      }
       // Perform accumulations
       List<DBContainer> listMFTRND10 = readMFTRND10(recMITALO30);
       for (DBContainer recMFTRND : listMFTRND10) {
@@ -760,6 +772,21 @@ public class Release extends ExtendM3Transaction {
       delMHPICH(recMHPICH, orgITALOPLSX);
     } else {
       // Update last MHPICH
+      DBAction query = database.table("MHPICH")
+        .index("00")
+        .reverse()
+        .selectAllFields()
+        .build();
+      DBContainer container = query.getContainer();
+      container.set("PICONO", XXCONO.toInteger());
+      container.set("PIDLIX", recMHPICH.getLong("PIDLIX"));
+      boolean isFirstRecord = true;
+      query.readAll(container, 2, 1,{ DBContainer record ->
+        if (isFirstRecord) {
+          recMHPICH = record;
+          isFirstRecord = false;
+        }
+      });
       if (splitPerformed || lineUpdate && LINCNT > 0) {
         Closure<?> updateMHPICH = { LockedResult lockedResult ->
           lockedResult.set("PINPLL", LINCNT);
@@ -774,8 +801,10 @@ public class Release extends ExtendM3Transaction {
           .build();
         DBContainer containerMHPICH = queryMHPICH.getContainer()
         containerMHPICH.set("PICONO", XXCONO.toInteger());
-        containerMHPICH.set("PIDLIX", inPIDLIX);
-        containerMHPICH.set("PIPLSX", inPIPLSX);
+//        containerMHPICH.set("PIDLIX", inPIDLIX);
+//        containerMHPICH.set("PIPLSX", inPIPLSX);
+        containerMHPICH.set("PIDLIX", recMHPICH.getLong("PIDLIX"));
+        containerMHPICH.set("PIPLSX", recMHPICH.getInt("PIPLSX"));
         queryMHPICH.readLock(containerMHPICH, updateMHPICH);
       }
       // Update last MHPICH - execute even if no split performed
@@ -1422,6 +1451,13 @@ public class Release extends ExtendM3Transaction {
       containerMITALO.setLong("MQPLRN", recMFTRND.getLong("O0PLRN"));
       containerMITALO.set("MQPLSX", recMHPICH.getInt("PIPLSX"));
       queryMITALO.readAll(containerMITALO, 2, { DBContainer record ->
+        //Retrieve latest MHPICH  //A 20220304
+        List<DBContainer> lstMHPICH = readCurrentMHPICH(recMHPICH);  //A 20220304
+        for (DBContainer recCurMHPICH: lstMHPICH) {
+          recMHPICH = recCurMHPICH;
+          XSPLSX = recCurMHPICH.getInt("PIPLSX");
+          break;
+        }
         if (containerMITALO.getInt("MQPLSX") == XSPLSX) {
           // Split on single package - create next suffix and reset counts
           if (breakOnPackage) {
@@ -1453,6 +1489,29 @@ public class Release extends ExtendM3Transaction {
             // Break already hit - update all subsequent lines
             if (lineUpdate) {
               updSubLines(record, recMHPICH);
+              //read MITALO50 record again with the new PLSX to refresh record //20220307
+              DBAction queryMITALO50 = database.table("MITALO")
+                .selectAllFields()
+                .index("00")
+                .build();
+              DBContainer containerMITALO50 = queryMITALO50.getContainer();
+              containerMITALO50.set("MQCONO", XXCONO.toInteger())
+              containerMITALO50.set("MQRIDI", Long.parseLong(record.get("MQRIDI").toString().trim()));
+              containerMITALO50.set("MQPLSX", recMHPICH.getInt("PIPLSX"));
+              containerMITALO50.set("MQCAMU", record.getString("MQCAMU"));
+              containerMITALO50.set("MQITNO", record.getString("MQITNO"));
+              containerMITALO50.set("MQWHLO", record.getString("MQWHLO"));
+              containerMITALO50.set("MQWHSL", record.getString("MQWHSL"));
+              containerMITALO50.set("MQBANO", record.getString("MQBANO"));
+              containerMITALO50.set("MQTTYP", record.getInt("MQTTYP"));
+              containerMITALO50.set("MQRIDN", record.getString("MQRIDN"));
+              containerMITALO50.set("MQRIDO", record.getInt("MQRIDO"));
+              containerMITALO50.set("MQRIDL", record.getInt("MQRIDL"));
+              containerMITALO50.set("MQRIDX", record.getInt("MQRIDX"));
+              containerMITALO50.set("MQSOFT", record.getInt("MQSOFT"));
+              if (queryMITALO50.read(containerMITALO50)) {
+                record = containerMITALO50;
+              }
             }
           }
           // Perform accumulations
@@ -1639,22 +1698,105 @@ public class Release extends ExtendM3Transaction {
   }
 
   /**
+   * readCurrentMHPICH - read latest MHPICH PLSX
+   * @param recMHPICH
+   * @return
+   * @since 20220304
+   */
+  def List <DBContainer> readCurrentMHPICH(DBContainer recMHPICH) {
+    List<DBContainer> containers = new ArrayList();
+    DBAction query = database.table("MHPICH")
+      .index("00")
+      .selectAllFields()
+      .reverse()
+      .build();
+    DBContainer container = query.getContainer();
+    container.set("PICONO", XXCONO.toInteger());
+    container.set("PIDLIX", recMHPICH.getLong("PIDLIX"));
+    query.readAll(container, 2, 1,{ DBContainer record ->
+      containers.add(record.createCopy());
+    });
+    return containers;
+  }
+
+  /**
    * updSubLines - update all subsequent lines
    * @param recMITALO
    * @param recMHPICH
    * @return
    */
   def updSubLines(DBContainer recMITALO, DBContainer recMHPICH) {
+    logger.debug("updSubLines recMITALO${recMITALO}/recMHPICH=${recMHPICH}/LINCNT=${LINCNT}/")
+    //This should delete instead of updating since PLSX is in the unique key and read latest MHPICH for PLSX
     Closure<?> updateMITALO = { LockedResult lockedResult ->
-      logger.debug("updSubLines:PLSX=${recMHPICH.getInt("PIPLSX")}/${lockedResult.getString("MQSTAT").trim()}/");
-      if (lockedResult.getString("MQSTAT").trim() == "") {
-        lockedResult.set("MQSTAT", inPISS);
-      }
-      lockedResult.set("MQPLSX", recMHPICH.getInt("PIPLSX"));
-      lockedResult.set("MQLMDT", currentDate);
-      lockedResult.set("MQCHID", program.getUser());
-      lockedResult.set("MQCHNO", lockedResult.getInt("MQCHNO") + 1);
-      lockedResult.update();
+      logger.debug("updSubLines:PIPLSX=${recMHPICH.get("PIPLSX")}/MQPLSX=${lockedResult.get("MQPLSX")}/");
+      lockedResult.delete();
+      //Insert MITALO with new PLSX
+        DBAction queryMITALO = database.table("MITALO")
+          .index("00")
+          .build();
+        DBContainer containerMITALO = queryMITALO.getContainer();
+        containerMITALO.set("MQCONO", lockedResult.get("MQCONO"));
+        containerMITALO.set("MQWHLO", lockedResult.get("MQWHLO"));
+        containerMITALO.set("MQITNO", lockedResult.get("MQITNO"));
+        containerMITALO.set("MQWHSL", lockedResult.get("MQWHSL"));
+        containerMITALO.set("MQBANO", lockedResult.get("MQBANO"));
+        containerMITALO.set("MQCAMU", lockedResult.get("MQCAMU"));
+        containerMITALO.set("MQREPN", lockedResult.get("MQREPN"));
+        containerMITALO.set("MQTTYP", lockedResult.get("MQTTYP"));
+        containerMITALO.set("MQRIDN", lockedResult.get("MQRIDN"));
+        containerMITALO.set("MQRIDO", lockedResult.get("MQRIDO"));
+        containerMITALO.set("MQRIDI", lockedResult.get("MQRIDI"));
+//        if (LINCNT > 1) { //D 20220420
+          containerMITALO.set("MQPLSX", recMHPICH.get("PIPLSX"));
+//        } else { //D 20220420
+//          containerMITALO.set("MQPLSX", lockedResult.get("MQPLSX")); //D 20220420
+//        } //D 20220420
+        containerMITALO.set("MQRIDL", lockedResult.get("MQRIDL"));
+        containerMITALO.set("MQSLTP", lockedResult.get("MQSLTP"));
+        containerMITALO.set("MQPISE", lockedResult.get("MQPISE"));
+        containerMITALO.set("MQALQT", lockedResult.get("MQALQT"));
+        containerMITALO.set("MQSORT", lockedResult.get("MQSORT"));
+        containerMITALO.set("MQTRFL", lockedResult.get("MQTRFL"));
+        containerMITALO.set("MQMAAL", lockedResult.get("MQMAAL"));
+        containerMITALO.set("MQRFTX", lockedResult.get("MQRFTX"));
+        containerMITALO.set("MQPGNM", lockedResult.get("MQPGNM"));
+        containerMITALO.set("MQPLPR", lockedResult.get("MQPLPR"));
+        containerMITALO.set("MQPAQT", lockedResult.get("MQPAQT"));
+        containerMITALO.set("MQCAWE", lockedResult.get("MQCAWE"));
+        containerMITALO.set("MQFLOC", lockedResult.get("MQFLOC"));
+        containerMITALO.set("MQDEV", lockedResult.get("MQDEV"));
+        containerMITALO.set("MQSTCD", lockedResult.get("MQSTCD"));
+        containerMITALO.set("MQSOFT", lockedResult.get("MQSOFT"));
+        containerMITALO.set("MQTRQT", lockedResult.get("MQTRQT"));
+        containerMITALO.set("MQTWSL", lockedResult.get("MQTWSL"));
+        containerMITALO.set("MQOEND", lockedResult.get("MQOEND"));
+        containerMITALO.set("MQPLRI", lockedResult.get("MQPLRI"));
+        containerMITALO.set("MQTRQA", lockedResult.get("MQTRQA"));
+        containerMITALO.set("MQALQA", lockedResult.get("MQALQA"));
+        containerMITALO.set("MQALQN", lockedResult.get("MQALQN"));
+        containerMITALO.set("MQPAQA", lockedResult.get("MQPAQA"));
+        containerMITALO.set("MQCNNR", lockedResult.get("MQCNNR"));
+        containerMITALO.set("MQLSQN", lockedResult.get("MQLSQN"));
+        containerMITALO.set("MQSSEQ", lockedResult.get("MQSSEQ"));
+        containerMITALO.set("MQPLRN", lockedResult.get("MQPLRN"));
+        containerMITALO.set("MQRGDT", lockedResult.get("MQRGDT"));
+        containerMITALO.set("MQRGTM", lockedResult.get("MQRGTM"));
+        containerMITALO.set("MQLMDT", lockedResult.get("MQLMDT"));
+        containerMITALO.set("MQCHNO", lockedResult.get("MQCHNO"));
+        containerMITALO.set("MQCHID", lockedResult.get("MQCHID"));
+        containerMITALO.set("MQRIDX", lockedResult.get("MQRIDX"));
+        containerMITALO.set("MQAUCZ", lockedResult.get("MQAUCZ"));
+        containerMITALO.set("MQORRN", lockedResult.get("MQORRN"));
+        containerMITALO.set("MQSUME", lockedResult.get("MQSUME"));
+        logger.debug("updateAllocations insert:MQPLSX=${containerMITALO.get("MQPLSX")}/MQSTAT=${ containerMITALO.get("MQSTAT")}/lckRSSTAT=${lockedResult.get("MQSTAT")}/");
+        containerMITALO.set("MQSTAT", lockedResult.get("MQSTAT"));
+        //logger.debug("updateAllocations insertdelete:MQPLSX=${containerMITALO.get("MQPLSX")}/lockedResMQSTAT=${lockedResult.getString("MQSTAT").trim()}/${inPISS}/${(lockedResult.getString("MQSTAT").trim() == "")}");
+        if (containerMITALO.getString("MQSTAT").trim() == "") {
+          containerMITALO.set("MQSTAT", inPISS);
+        }
+        queryMITALO.insert(containerMITALO);
+
     }
     DBAction queryMITALO = database.table("MITALO")
       .index("00")
@@ -1675,6 +1817,38 @@ public class Release extends ExtendM3Transaction {
     containerMITALO.set("MQRIDX", recMITALO.getInt("MQRIDX"));
     containerMITALO.set("MQSOFT", recMITALO.getInt("MQSOFT"));
     queryMITALO.readLock(containerMITALO, updateMITALO);
+    //to add edz 20220304 end
+  //Deleted 20220304 not applicable since it can't update the unique key
+//    Closure<?> updateMITALO = { LockedResult lockedResult ->
+//      logger.debug("updSubLines:PLSX=${recMHPICH.getInt("PIPLSX")}/${lockedResult.getString("MQSTAT").trim()}/");
+//      if (lockedResult.getString("MQSTAT").trim() == "") {
+//        lockedResult.set("MQSTAT", inPISS);
+//      }
+//      lockedResult.set("MQPLSX", recMHPICH.getInt("PIPLSX"));
+//      lockedResult.set("MQLMDT", currentDate);
+//      lockedResult.set("MQCHID", program.getUser());
+//      lockedResult.set("MQCHNO", lockedResult.getInt("MQCHNO") + 1);
+//      lockedResult.update();
+//    }
+//    DBAction queryMITALO = database.table("MITALO")
+//      .index("00")
+//      .build();
+//    DBContainer containerMITALO = queryMITALO.getContainer();
+//    containerMITALO.set("MQCONO", XXCONO.toInteger())
+//    containerMITALO.set("MQRIDI", Long.parseLong(recMITALO.get("MQRIDI").toString().trim()));
+//    containerMITALO.set("MQPLSX", recMITALO.getInt("MQPLSX"));
+//    containerMITALO.set("MQCAMU", recMITALO.getString("MQCAMU"));
+//    containerMITALO.set("MQITNO", recMITALO.getString("MQITNO"));
+//    containerMITALO.set("MQWHLO", recMITALO.getString("MQWHLO"));
+//    containerMITALO.set("MQWHSL", recMITALO.getString("MQWHSL"));
+//    containerMITALO.set("MQBANO", recMITALO.getString("MQBANO"));
+//    containerMITALO.set("MQTTYP", recMITALO.getInt("MQTTYP"));
+//    containerMITALO.set("MQRIDN", recMITALO.getString("MQRIDN"));
+//    containerMITALO.set("MQRIDO", recMITALO.getInt("MQRIDO"));
+//    containerMITALO.set("MQRIDL", recMITALO.getInt("MQRIDL"));
+//    containerMITALO.set("MQRIDX", recMITALO.getInt("MQRIDX"));
+//    containerMITALO.set("MQSOFT", recMITALO.getInt("MQSOFT"));
+//    queryMITALO.readLock(containerMITALO, updateMITALO);
   }
 
   /**
@@ -1784,16 +1958,20 @@ public class Release extends ExtendM3Transaction {
    *    splitLineMHPICHMITALO   - Split line MHPICH MITALO (RSPLIT)
    */
   def void splitLineMHPICHMITALO(DBContainer recMHPICH, DBContainer recMITALO) {
-    logger.debug("splitLineMHPICHMITALO: packageCheck=${packageCheck}/breakOnLine=${breakOnLine}/fromspltNoOfPac=${fromspltNoOfPac}")
-    // Next suffix
+    logger.debug("splitLineMHPICHMITALO: packageCheck=${packageCheck}/breakOnLine=${breakOnLine}/fromspltNoOfPac=${fromspltNoOfPac}");
+    logger.debug("splitLineMHPICHMITALO: recMHPICH=${recMHPICH}/");
+    logger.debug("splitLineMHPICHMITALO: recMITALO=${recMITALO}/");
+    logger.debug("splitLineMHPICHMITALO: TOTCNT=${TOTCNT}/XXNPLL=${XXNPLL}/LINCNT=${LINCNT}");
+//    // Next suffix
     updatePickingListStatus(recMHPICH);
     // Allocation adjustment
     if (packageCheck || breakOnLine) {
       if (!fromspltNoOfPac) {
+        logger.debug("splitLineMHPICHMITALO: Allocation adjustment: packageCheck=${packageCheck}/breakOnLine=${breakOnLine}/fromspltNoOfPac=${fromspltNoOfPac}");
         boolean isFirstRecord = true;
         Closure<?> getRecord = { DBContainer record ->
           if (isFirstRecord) {
-            logger.debug("splitLineMHPICHMITALO=${record}");
+            logger.debug("splitLineMHPICHMITALO: call updateAllocations MHPICH current by reverse record=${record}/should be the latest PLSX");
             updateAllocations(recMITALO, record);
             isFirstRecord = false;
           }
@@ -1828,6 +2006,7 @@ public class Release extends ExtendM3Transaction {
     TIMWCT = 0D;
     PKDLQT = 0D;
     picklistPrintJob = false;
+    logger.debug("splitLineMHPICHMITALO Save variables: packageCheck=${packageCheck}/TOTCNT=${TOTCNT}/XXNPLL=${XXNPLL}/LINCNT=${LINCNT}/");
   }
 
   /**
@@ -1843,6 +2022,7 @@ public class Release extends ExtendM3Transaction {
       TOTCNT == XXNPLL &&
       LINCNT > 1) {
       Closure<?> updMHDISH = { LockedResult lockedResult ->
+        logger.debug("updatePickingListStatus:update OQPLSX");
         lockedResult.set("OQPLSX", lockedResult.getInt("OQPLSX") + 1);
         lockedResult.set("OQLMDT", currentDate);
         lockedResult.set("OQCHNO", lockedResult.getInt("OQCHNO") + 1);
@@ -1876,6 +2056,7 @@ public class Release extends ExtendM3Transaction {
         packageCheck ||
         !packageCheck &&
         LINCNT > 1) {
+//          This will update the current pick list
         lockedResult.set("PINPLL", (LINCNT - 1));
         if (checkPickLines) {
           lockedResult.set("PICLPL", (LINCNT - 1));
@@ -1938,6 +2119,7 @@ public class Release extends ExtendM3Transaction {
     if (EDPRTA == 1) {
       performPickingList(recMHPICH);
     }
+    //Get the current PLSX
     DBAction queryMHDISH = database.table("MHDISH")
       .index("00")
       .selection("OQPLSX")
@@ -1948,19 +2130,22 @@ public class Release extends ExtendM3Transaction {
     containerMHDISH.set("OQDLIX", recMHPICH.getLong("PIDLIX"));
     queryMHDISH.read(containerMHDISH);
     int OQPLSX = containerMHDISH.getInt("OQPLSX");
-    logger.debug("updatePickingListHeader:OQPLSX=${OQPLSX}/packageCheck=${packageCheck}")
+    logger.debug("updatePickingListHeader:current OQPLSX=${OQPLSX}/packageCheck=${packageCheck}/PIPLSX=${recMHPICH.getInt("PIPLSX")}/");
 
     //Read again to retrieve current values
+    //Insert new PLSX for split
     DBAction queryMHPICH = database.table("MHPICH")
       .index("00")
       .selectAllFields()
       .build();
     recMHPICH = query.getContainer();
     recMHPICH.setInt("PICONO", XXCONO.toInteger());
-    recMHPICH.setLong("PIDLIX", inDLIX.toLong());
-    recMHPICH.setInt("PIPLSX", inPLSX.toInteger());
+//    recMHPICH.setLong("PIDLIX", inDLIX.toLong()); //20220307
+//    recMHPICH.setInt("PIPLSX", inPLSX.toInteger()); //20220307
+    recMHPICH.set("PIDLIX", recMHPICH.getLong("PIDLIX")); //20220307
+    recMHPICH.set("PIPLSX", recMHPICH.getInt("PIPLSX")); //20220307
     queryMHPICH.read(recMHPICH);
-    logger.debug("readagain recMHPICH=${recMHPICH}")
+//    logger.debug("readagain recMHPICH=${recMHPICH}")
     if (packageCheck) {
       container.set("PICONO", XXCONO.toInteger());
       container.set("PIDLIX", recMHPICH.getLong("PIDLIX"));
@@ -2012,11 +2197,12 @@ public class Release extends ExtendM3Transaction {
       container.set("PIPCSP", recMHPICH.getInt("PIPCSP"));
       query.insert(container);
     } else {
-      // None package based split. Only prime next pick header record if further MITALO records to process
+//      // None package based split. Only prime next pick header record if further MITALO records to process
       logger.debug("updatePickingListHeader nonepackage TOTCNT=${TOTCNT}/XXNPLL=${XXNPLL}/LINCNT=${LINCNT}")
       if (TOTCNT < XXNPLL ||
         TOTCNT == XXNPLL &&
         LINCNT > 1) {
+        logger.debug("updatePickingListHeader: create newMHPICH with OQPLSX=${OQPLSX}/");
         container.set("PICONO", XXCONO.toInteger());
         container.set("PIDLIX", recMHPICH.getLong("PIDLIX"));
         container.set("PIPLSX", OQPLSX);
@@ -2076,11 +2262,21 @@ public class Release extends ExtendM3Transaction {
    *    updateAllocations  - Update Allocations (UALO)
    */
   def void updateAllocations(DBContainer recMITALO, DBContainer recMHPICH) {
-    logger.debug("updateAllocations===${recMITALO}/${recMHPICH}/${breakOnLine}/${PKDLQT}")
+    logger.debug("updateAllocations: recMITALO=${recMITALO}/recMHPICH=${recMHPICH}/breakOnLine=${breakOnLine}/PKDLQT=${PKDLQT}/LINCNT=${LINCNT}");
+    //This should delete and insert the line with the correct PLSX //20220301
+    //to add edz 20220304
+    //flow should be okay
+    //to add edz 20220304 end
+
     Closure<?> updateMITALO = { LockedResult lockedResult ->
       // Break level is at MITALO level simply adjust pick list suffix
       if (breakOnLine || PKDLQT == 0) {
+        logger.debug("updateAllocations:Insert MITALO with new PLSX:LINCNT=${LINCNT}/PIPLSX=${recMHPICH.get("PIPLSX")}/lockPLSX=${lockedResult.get("MQPLSX")}/lockRSSTAT=${lockedResult.get("MQSTAT")}/then delete old MITALO");
+        //Delete current MITALO record with the old PLSX since a new MITALO record is added //A 20220301
+        logger.debug("updateAllocations delete MITALO.PLSX=${lockedResult.get("MQPLSX")}/RIDL=${lockedResult.get("MQRIDL")}/insert PIPLSX=${recMHPICH.get("PIPLSX")}/");
+        lockedResult.delete();
 
+          //Insert MITALO with new PLSX
         DBAction queryMITALO = database.table("MITALO")
           .index("00")
           .build();
@@ -2138,8 +2334,9 @@ public class Release extends ExtendM3Transaction {
         containerMITALO.set("MQAUCZ", lockedResult.get("MQAUCZ"));
         containerMITALO.set("MQORRN", lockedResult.get("MQORRN"));
         containerMITALO.set("MQSUME", lockedResult.get("MQSUME"));
-        logger.debug("updateAllocations insert:MQPLSX=${containerMITALO.get("MQPLSX")}/${lockedResult.getString("MQSTAT").trim()}/${inPISS}/${(lockedResult.getString("MQSTAT").trim() == "")}");
-        logger.debug("updateAllocations insert:MQPLSX=${containerMITALO.get("MQPLSX")}/${ containerMITALO.get("MQSTAT")}/");
+        logger.debug("updateAllocations insertdelete:MQPLSX=${containerMITALO.get("MQPLSX")}/iSTAT=${ containerMITALO.get("MQSTAT")}/lcRSStAT=${lockedResult.get("MQSTAT")}/LINCNT=${LINCNT}/");
+        containerMITALO.set("MQSTAT", lockedResult.get("MQSTAT")); //20220304
+//        logger.debug("updateAllocations insertdelete:MQPLSX=${containerMITALO.get("MQPLSX")}/lockedResMQSTAT=${lockedResult.getString("MQSTAT").trim()}/${inPISS}/${(lockedResult.getString("MQSTAT").trim() == "")}");
         if (containerMITALO.getString("MQSTAT").trim() == "") {
           containerMITALO.set("MQSTAT", inPISS);
         }
@@ -2148,7 +2345,9 @@ public class Release extends ExtendM3Transaction {
 //        if (LINCNT > 1) {
 //          lockedResult.set("MQPLSX", recMHPICH.getInt("PIPLSX"));
 //        }
-        lockedResult.delete();
+//            //Delete current MITALO record with the old PLSX since a new MITALO record is added //A 20220301
+//          logger.debug("updateAllocations insertdelete MITALO.PLSX=${lockedResult.get("MQPLSX")}/NewMITALO.PLSX=${containerMITALO.get("MQPLSX")}");
+//        lockedResult.delete();
 
         // Break level is at "quantity" level update current MITALO with accumulated totals and
         // prime next record
@@ -2157,6 +2356,7 @@ public class Release extends ExtendM3Transaction {
         lockedResult.set("MQALQT", PKDLQT);
         lockedResult.set("MQPAQT", PKDLQT);
         lockedResult.set("MQALQN", 0D);
+        logger.debug("updateAllocations:Adjust existing allocation line MQPLSX=${lockedResult.get("MQPLSX")}/")
         // Catchweight
         if (lockedResult.getDouble("MQCAWE") != 0 && MMCAWP == 0) {
           lockedResult.set("MQCAWE", retrieveCatchWeight(lockedResult));
@@ -2166,7 +2366,7 @@ public class Release extends ExtendM3Transaction {
         lockedResult.set("MQALQA", 0D);
         lockedResult.set("MQPAQA", 0D);
 
-        logger.debug("updateAllocations update MQPLSX=${lockedResult.get("MQPLSX")}/${lockedResult.getString("MQSTAT").trim()}/${inPISS}/${(lockedResult.getString("MQSTAT").trim() == "")}");
+//        logger.debug("updateAllocations update MQPLSX=${lockedResult.get("MQPLSX")}/${lockedResult.getString("MQSTAT").trim()}/${inPISS}/${(lockedResult.getString("MQSTAT").trim() == "")}");
         if (lockedResult.getString("MQSTAT").trim() == "") {
           lockedResult.set("MQSTAT", inPISS);
         }
@@ -2200,6 +2400,7 @@ public class Release extends ExtendM3Transaction {
         containerMITALO.set("MQPAQT", 0D);
         containerMITALO.set("MQALQN", 0D);
         containerMITALO.set("MQCAWE", 0D);
+        containerMITALO.set("MQSTAT", recMITALO.getString("MQSTAT"));
         logger.debug("updateAllocations insert=${recMITALO.getString("MQSTAT").trim()}/");
         if (recMITALO.getString("MQSTAT").trim() == "") {
           containerMITALO.set("MQSTAT", inPISS);
@@ -2397,29 +2598,68 @@ public class Release extends ExtendM3Transaction {
     int orgITALOPLSX = 0;
     boolean restoreValues = false;
     // Allocations
+//    logger.debug("calculateAllocationBasedSplit recMHPICH to be used in MITALO30:${recMHPICH}");
     List<DBContainer> lstMITALO30 = readMITALO30(recMHPICH);
+//    logger.debug("calculateAllocationBasedSplit lstMITALO30=${lstMITALO30}");
+
     for (DBContainer recMITALO30: lstMITALO30) {
+      //logger.debug("calculateAllocationBasedSplit forloop recMITALO30:${recMITALO30}/");
       orgITALOPLSX = recMITALO30.getInt("MQPLSX");
       LINCNT++;
       TOTCNT++;
-      logger.debug("calculateAllocationBasedSplit:checkPickLines=${checkPickLines}/LINCNT=${MCMXPL}/lineUpdate=${lineUpdate}/XXNPLL=${XXNPLL}");
+      logger.debug("inside for loop calculateAllocationBasedSplit:checkPickLines=${checkPickLines}/LINCNT=${LINCNT}/TOTCNT=${TOTCNT}/MCMXPL=${MCMXPL}/XXNPLL=${XXNPLL}/EDCPTM=${EDCPTM}/");
+      logger.debug("calculateAllocationBasedSplit:lineUpdate=${lineUpdate}/breakOnLine=${breakOnLine}/fromspltNoOfPac=${fromspltNoOfPac}/");
+      //Retrieve latest MHPICH  //A 20220304
+      List<DBContainer> lstMHPICH = readCurrentMHPICH(recMHPICH);  //A 20220304
+      for (DBContainer recCurMHPICH: lstMHPICH) {
+        recMHPICH = recCurMHPICH;
+        break;
+      }
+      logger.debug("ITALO30.ITNO=${recMITALO30.getString("MQITNO").trim();}/RIDL=${recMITALO30.getInt("MQRIDL")}/TRQT=${recMITALO30.getDouble("MQTRQT")}/MQPLSX=${recMITALO30.getInt("MQPLSX")}/PIPLSX=${recMHPICH.getInt("PIPLSX")}/}");
+
       // Perform line break check
       if (checkPickLines &&
         LINCNT > MCMXPL) {
         XXPCSI = 15;
         lineUpdate = true;
-        splitLineMHPICHMITALO(recMHPICH, recMITALO30);
+        logger.debug("calculateAllocationBasedSplit linebreakcheck splitLineMHPICHMITALO()");
+        splitLineMHPICHMITALO(recMHPICH, recMITALO30);  //TO uncomment edz
       } else {
         // Break already hit - update all subsequent lines
         if (lineUpdate) {
-          updSubLines(recMITALO30, recMHPICH);
+          logger.debug("calculateAllocationBasedSplit linebreakcheck updSubLines()/LINCNT=${LINCNT}");
+          updSubLines(recMITALO30, recMHPICH);  //TO uncomment edz
+          //read MITALO30 record again with the new PLSX to refresh record //20220307
+          DBAction queryMITALO30 = database.table("MITALO")
+            .selectAllFields()
+            .index("00")
+            .build();
+          DBContainer containerMITALO30 = queryMITALO30.getContainer();
+          containerMITALO30.set("MQCONO", XXCONO.toInteger())
+          containerMITALO30.set("MQRIDI", Long.parseLong(recMITALO30.get("MQRIDI").toString().trim()));
+          containerMITALO30.set("MQPLSX", recMHPICH.getInt("PIPLSX"));
+          containerMITALO30.set("MQCAMU", recMITALO30.getString("MQCAMU"));
+          containerMITALO30.set("MQITNO", recMITALO30.getString("MQITNO"));
+          containerMITALO30.set("MQWHLO", recMITALO30.getString("MQWHLO"));
+          containerMITALO30.set("MQWHSL", recMITALO30.getString("MQWHSL"));
+          containerMITALO30.set("MQBANO", recMITALO30.getString("MQBANO"));
+          containerMITALO30.set("MQTTYP", recMITALO30.getInt("MQTTYP"));
+          containerMITALO30.set("MQRIDN", recMITALO30.getString("MQRIDN"));
+          containerMITALO30.set("MQRIDO", recMITALO30.getInt("MQRIDO"));
+          containerMITALO30.set("MQRIDL", recMITALO30.getInt("MQRIDL"));
+          containerMITALO30.set("MQRIDX", recMITALO30.getInt("MQRIDX"));
+          containerMITALO30.set("MQSOFT", recMITALO30.getInt("MQSOFT"));
+          if (queryMITALO30.read(containerMITALO30)) {
+            recMITALO30 = containerMITALO30;
+            orgITALOPLSX = recMITALO30.getInt("MQPLSX");
+          }
         }
       }
+      logger.debug("calculateAllocationBasedSplit:lineUpdate=${lineUpdate}/MQPLSX=${recMITALO30.getInt("MQPLSX")}/RIDL=${recMITALO30.getInt("MQRIDL")}/PIPLSX=${recMHPICH.getInt("PIPLSX")}/")
       // Perform accumulations
       restoreValues = false;
       //   Retrieve item
       getItemDtls(recMITALO30.getString("MQITNO"));
-      logger.debug("calculateAllocationBasedSplit:EDCPTM=${EDCPTM}");
       if (EDCPTM == 1) {
         calculatePickingTime(recMITALO30, 0);
         TIMCNT += XXNUM;
@@ -2430,8 +2670,8 @@ public class Release extends ExtendM3Transaction {
       PKGRWE += XXGRWE;
       PKVOL3 += XXVOL3;
       // Weight
-      logger.debug("calculateAllocationBasedSplit:checkItemWeight=${checkItemWeight}/PKGRWE=${PKGRWE}/MCMXPW=${MCMXPW}");
       if (checkItemWeight) {
+        logger.debug("calculateAllocationBasedSplit: Weight checkItemWeight=${checkItemWeight}/PKGRWE=${PKGRWE}/MCMXPW=${MCMXPW}/");
         if (PKGRWE > MCMXPW) {
           XXPCSI = 12;
           lineUpdate = true;
@@ -2445,7 +2685,7 @@ public class Release extends ExtendM3Transaction {
             PKVOL3 -= XXVOL3;
           }
           // Create next suffix and prime next MITALO record
-          splitLineMHPICHMITALO(recMHPICH, recMITALO30);
+          splitLineMHPICHMITALO(recMHPICH, recMITALO30);  //TO uncomment EDZ
           if (restoreValues) {
             restoreValues = false;
             // Restore current totals
@@ -2456,20 +2696,22 @@ public class Release extends ExtendM3Transaction {
         }
       }
       // Volume
-      logger.debug("calculateAllocationBasedSplit:checkItemVolume=${checkItemVolume}/breakOnWeight=${breakOnWeight}/PKVOL3=${PKVOL3}/MCMXPV=${MCMXPV}")
       if (checkItemVolume && !breakOnWeight) {
+        logger.debug("calculateAllocationBasedSplit:VOLUME checkItemVolume=${checkItemVolume}/breakOnWeight=${breakOnWeight}/PKVOL3=${PKVOL3}/MCMXPV=${MCMXPV}")
         if (PKVOL3 > MCMXPV) {
           XXPCSI = 13;
           lineUpdate = true;
           breakOnVolume = true;
           // Need to check if breaking on a single line
           if (LINCNT > 1) {
+            logger.debug("VOLUME==== checkItemVolume: LINCNT=${LINCNT}/TIMCNT=${TIMCNT}/PKGRWE=${PKGRWE}/PKVOL3=${PKVOL3}/XXNUM=${XXNUM}/XXGRWE=${XXGRWE}/XXVOL3=${XXVOL3}")
             restoreValues = true;
             // Remove latest totals and update retrospectively
             TIMCNT -= XXNUM;
             PKGRWE -= XXGRWE;
             PKVOL3 -= XXVOL3;
           }
+          logger.debug("VOLUME===> after restore checkItemVolume: LINCNT=${LINCNT}/restoreValues=${restoreValues}/callmethod splitLineMHPICHMITALO/packageCheck=${packageCheck}/breakOnLine=${breakOnLine}/fromspltNoOfPac=${fromspltNoOfPac}/PKVOL3=${PKVOL3}/XXVOL3=${XXVOL3}");
           // Create next suffix and prime next MITALO record
           splitLineMHPICHMITALO(recMHPICH, recMITALO30);
           if (restoreValues) {
@@ -2486,6 +2728,7 @@ public class Release extends ExtendM3Transaction {
         !breakOnWeight &&
         !breakOnVolume &&
         EDCPTM == 1) {
+        logger.debug("calculateAllocationBasedSplit: Pick time checkPickTime=${checkPickTime}/breakOnWeight=${breakOnWeight}/breakOnVolume=${breakOnVolume}/EDCPTM=${EDCPTM}/TIMCNT=${TIMCNT}/MCMXPT=${MCMXPT}/LINCNT=${LINCNT}/");
         if (TIMCNT > MCMXPT) {
           XXPCSI = 14;
           lineUpdate = true;
@@ -2499,7 +2742,7 @@ public class Release extends ExtendM3Transaction {
             PKVOL3 -= XXVOL3;
           }
           // Create next suffix and prime next MITALO record
-          splitLineMHPICHMITALO(recMHPICH, recMITALO30);
+          //splitLineMHPICHMITALO(recMHPICH, recMITALO30); to uncomment edz
           if (restoreValues) {
             restoreValues = false;
             // Restore current totals
@@ -2515,6 +2758,7 @@ public class Release extends ExtendM3Transaction {
     }
     //   Remove current picking list if all picking list lines moved to new picking list
     List<DBContainer> listMITALO30 = readMITALO30_MQPLSX(recMHPICH, orgITALOPLSX);
+    logger.debug("listMITALO30.size()=${listMITALO30.size()}")
     if (listMITALO30.size() == 0) {
       delMHPICH(recMHPICH, orgITALOPLSX);
     } else {
@@ -2533,7 +2777,7 @@ public class Release extends ExtendM3Transaction {
           isFirstRecord = false;
         }
       });
-      logger.debug("containers=====${recMHPICH}");
+      logger.debug("containers=====${recMHPICH}/lineUpdat=${lineUpdate}/LINCNT=${LINCNT}/");
       // Update last MHPICH
       if (lineUpdate && LINCNT > 0) {
         Closure<?> updateMHPICH = { LockedResult lockedResult ->
@@ -2567,6 +2811,7 @@ public class Release extends ExtendM3Transaction {
    * @return
    */
   def updLastMHPICH_CASPLT(DBContainer recMHPICH) {
+    logger.debug("updLastMHPICH_CASPLT mhpic=${recMHPICH}");
     Closure<?> updateMHPICH = { LockedResult lockedResult ->
       lockedResult.set("PIMXPW", MCMXPW);
       lockedResult.set("PIMXPV", MCMXPV);
